@@ -3,6 +3,8 @@ buddhabrot
 
 Simple buddhabrot generator written in Go. 
 
+![alt tag](https://raw.github.com/morcmarc/buddhabrot/master/example.png)
+
 ## Install
 
 ```
