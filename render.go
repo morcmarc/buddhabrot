@@ -6,7 +6,7 @@ import (
 	"runtime"
 
 	"github.com/banthar/Go-SDL/sdl"
-	// "github.com/banthar/Go-SDL/ttf"
+	"github.com/banthar/Go-SDL/ttf"
 	"github.com/dustin/go-humanize"
 	"github.com/go-gl/gl"
 )
@@ -40,13 +40,19 @@ func (s *SdlHandler) Start() {
 	// Prevent tearing
 	sdl.GL_SetAttribute(sdl.GL_SWAP_CONTROL, 1)
 
-	if sdl.SetVideoMode(s.Width, s.Height, 32, sdl.OPENGL) == nil {
-		panic("Could not start SDL")
+	screen := sdl.SetVideoMode(s.Width, s.Height, 32, sdl.OPENGL)
+	if screen == nil {
+		panic(sdl.GetError())
 	}
 
 	if gl.Init() != 0 {
 		panic("Could not init OpenGL")
 	}
+
+	if ttf.Init() != 0 {
+		panic("Could not init TTF")
+	}
+	defer ttf.Quit()
 
 	// Set window title
 	sdl.WM_SetCaption("Go Buddhabrot", "Go Buddhabrot")
@@ -62,20 +68,23 @@ func (s *SdlHandler) Start() {
 	gl.ClearColor(0, 0, 0, 0)
 
 	// Set up fonts
-	// font := ttf.OpenFont("scpr.ttf", 12)
-	// if font == nil {
-	// 	panic("Could not open font file")
-	// }
-	// defer font.Close()
+	font := ttf.OpenFont("SourceSansPro-Black.otf", 72)
+	if font == nil {
+		panic("Could not open font file")
+	}
+	defer font.Close()
 
 	var (
-		// text       *sdl.Surface
-		// textColor  sdl.Color = sdl.Color{255, 255, 255, 255}
-		running    bool = true
-		generating bool = false
-		cpus       int  = runtime.NumCPU()
-		count      int  = 0
+		text      *sdl.Surface
+		textColor sdl.Color = sdl.Color{255, 255, 255, 0}
+		running   bool      = true
+		cpus      int       = runtime.NumCPU()
+		count     int       = 0
 	)
+
+	for i := 0; i < cpus; i++ {
+		go s.Buddhabrot.StartWorker()
+	}
 
 	for running {
 		for e := sdl.PollEvent(); e != nil; e = sdl.PollEvent() {
@@ -87,22 +96,30 @@ func (s *SdlHandler) Start() {
 			}
 		}
 
-		if !generating {
-			for i := 0; i < cpus; i++ {
-				go s.Buddhabrot.StartWorker()
+		if count%1000 == 0 {
+			// Erase screen
+			gl.Clear(gl.COLOR_BUFFER_BIT)
+
+			// Render image
+			s.RenderImageOntoScreen(s.Buddhabrot.Img)
+
+			// Render sample counter
+			// DOES NOT WORK AT THE MOMENT
+			text = ttf.RenderUTF8_Blended(font, humanize.Comma(s.Buddhabrot.Samples), textColor)
+			if text == nil {
+				panic("Could not render font")
 			}
-			generating = true
+
+			// Render
+			sdl.GL_SwapBuffers()
+
+			screen.Blit(nil, text, nil)
+
+			// Prevent overflow
+			count = 0
 		}
 
 		count++
-		if count%10000 == 0 {
-			s.RenderImageOntoScreen(s.Buddhabrot.Img)
-			// text = ttf.RenderUTF8_Blended(font, fmt.Sprintf("Total Samples: %s\n", humanize.Comma(s.Buddhabrot.Samples)), textColor)
-			// if text == nil {
-			// 	panic("Could not render font")
-			// }
-			count = 0
-		}
 	}
 }
 
@@ -110,16 +127,10 @@ func (s *SdlHandler) RenderImageOntoScreen(img *image.RGBA) {
 	var tex gl.Texture = s.getTexture(img)
 	var tc TexCoords = TexCoords{0, 0, 1, 1}
 
-	// Erase screen
-	gl.Clear(gl.COLOR_BUFFER_BIT)
-
 	// Draw image as texture
 	tex.Bind(gl.TEXTURE_2D)
 	drawQuad(0, 0, s.Width, s.Height, tc.TX, tc.TY, tc.TX2, tc.TY2)
 	tex.Unbind(gl.TEXTURE_2D)
-
-	// Render
-	sdl.GL_SwapBuffers()
 }
 
 func (s *SdlHandler) getTexture(img *image.RGBA) gl.Texture {
