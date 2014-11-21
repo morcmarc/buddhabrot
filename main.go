@@ -43,12 +43,13 @@ func main() {
 		height := c.Int("height")
 		colors := SplitColors(c.String("color"))
 
-		buddha := NewBuddha(width, height, colors)
+		buddha := NewBuddha(width, height, colors, oFile)
+		sdlHandler := NewSdlHandler(width, height, buddha)
 
 		cpus := runtime.NumCPU()
 		runtime.GOMAXPROCS(cpus)
 
-		buddha.Run(oFile)
+		sdlHandler.Start()
 	}
 	app.Run(os.Args)
 }

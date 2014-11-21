@@ -5,6 +5,16 @@ Simple buddhabrot generator written in Go.
 
 ![alt tag](https://raw.github.com/morcmarc/buddhabrot/master/example.png)
 
+## Requirements
+
+The renderer uses SDL. On Mac you can install the library via homebrew:
+
+```
+$ brew install sdl 
+$ brew install sdl_image
+$ brew install sdl_ttf
+```
+
 ## Install
 
 ```
@@ -18,8 +28,9 @@ $ go install
 $ buddhabrot ~/buddha.png
 ```
 
-The process will stop whenever you press control-C or send a SIGTERM to it.
-Before shutting down it will render the image into the given file.
+This will open a window and display the render progress more or less real-time.
+When you're happy with the end result just close the window and the image will
+be saved into the given file.
 
 ```
 NAME:

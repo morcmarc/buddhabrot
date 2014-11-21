@@ -1,18 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"log"
 	"math"
 	"os"
-	"os/signal"
-	"runtime"
-	"syscall"
-
-	"github.com/dustin/go-humanize"
 )
 
 const (
@@ -27,11 +21,14 @@ const (
 )
 
 type Buddha struct {
-	Width   int
-	Height  int
-	Palette []int
-	Img     *image.RGBA
-	Samples int64
+	Width      int
+	Height     int
+	Palette    []int
+	Img        *image.RGBA
+	Samples    int64
+	Out        *os.File
+	Pix        *DensityMatrix
+	Iterations int
 }
 
 type Trajectories struct {
@@ -45,14 +42,17 @@ type DensityMatrix struct {
 	Blue  []int
 }
 
-func NewBuddha(w, h int, p []int) *Buddha {
+func NewBuddha(w, h int, p []int, o *os.File) *Buddha {
 	rect := image.Rect(0, 0, w, h)
 	return &Buddha{
-		Width:   w,
-		Height:  h,
-		Palette: p,
-		Samples: 0,
-		Img:     image.NewRGBA(rect),
+		Width:      w,
+		Height:     h,
+		Palette:    p,
+		Samples:    0,
+		Img:        image.NewRGBA(rect),
+		Out:        o,
+		Pix:        NewDensityMatrix(w, h),
+		Iterations: MaxInt(p),
 	}
 }
 
@@ -72,42 +72,24 @@ func NewDensityMatrix(w, h int) *DensityMatrix {
 	}
 }
 
-func (b *Buddha) Run(out *os.File) {
-	e := MaxInt(b.Palette)
-	densityMtx := NewDensityMatrix(b.Width, b.Height)
-
-	signalChannel := make(chan os.Signal, 2)
-	signal.Notify(signalChannel, os.Interrupt, syscall.SIGTERM)
-
-	fmt.Println("Press control-c to terminate execution and render image.")
-
-	cpus := runtime.NumCPU()
-	for i := 0; i < cpus; i++ {
-		go b.mainLoop(densityMtx, e)
-	}
-
-	sig := <-signalChannel
-	switch sig {
-	default:
-		fmt.Printf("\nTotal Samples: %s\n", humanize.Comma(b.Samples))
-		b.writeImage(out, densityMtx)
-	}
-
-}
-
-func (b *Buddha) mainLoop(densityMtx *DensityMatrix, e int) {
+func (b *Buddha) StartWorker() {
 	for {
 		Cr, Ci := GetRandomComplex(REAL_L, REAL_H, IMAG_L, IMAG_H)
 
-		if isInMSet(Cr, Ci, 0, e) {
+		if isInMSet(Cr, Ci, 0, b.Iterations) {
 			continue
 		}
 
-		n, t := b.getTrajectories(Cr, Ci, e)
-		b.evaluateTrajectories(n, t, densityMtx)
+		n, t := b.getTrajectories(Cr, Ci, b.Iterations)
+		b.evaluateTrajectories(n, t)
+
+		if b.Samples%100000 == 0 {
+			b.writeImage()
+		}
 
 		b.Samples++
 	}
+
 }
 
 func (b *Buddha) getTrajectories(Cr, Ci float64, e int) (int, *Trajectories) {
@@ -129,7 +111,7 @@ func (b *Buddha) getTrajectories(Cr, Ci float64, e int) (int, *Trajectories) {
 	return n, t
 }
 
-func (b *Buddha) evaluateTrajectories(n int, t *Trajectories, d *DensityMatrix) {
+func (b *Buddha) evaluateTrajectories(n int, t *Trajectories) {
 	for i := 0; i < n; i++ {
 		// Translate R and I coordinates into pixel coords.
 		tr := ((t.Real[i] - REAL_L) / math.Abs(REAL_H-REAL_L))
@@ -142,41 +124,44 @@ func (b *Buddha) evaluateTrajectories(n int, t *Trajectories, d *DensityMatrix) 
 		}
 
 		if n < b.Palette[0] {
-			d.Red[coordY*b.Width+coordX]++
+			b.Pix.Red[coordY*b.Width+coordX]++
 		}
 
 		if n < b.Palette[1] {
-			d.Green[coordY*b.Width+coordX]++
+			b.Pix.Green[coordY*b.Width+coordX]++
 		}
 
 		if n < b.Palette[2] {
-			d.Blue[coordY*b.Width+coordX]++
+			b.Pix.Blue[coordY*b.Width+coordX]++
 		}
 	}
 }
 
-func (b *Buddha) writeImage(out *os.File, d *DensityMatrix) {
-	fmt.Println("Writing image file")
-	var maxR int = MaxInt(d.Red)
-	var maxG int = MaxInt(d.Green)
-	var maxB int = MaxInt(d.Blue)
-	fmt.Printf("Hits: R=%d G=%d B=%d\n", maxR, maxG, maxB)
+func (b *Buddha) writeImage() {
+	var maxR int = MaxInt(b.Pix.Red)
+	var maxG int = MaxInt(b.Pix.Green)
+	var maxB int = MaxInt(b.Pix.Blue)
+
 	var fR float64 = float64(256) / float64(maxR)
 	var fG float64 = float64(256) / float64(maxG)
 	var fB float64 = float64(256) / float64(maxB)
 
 	for i := 0; i < b.Width; i++ {
 		for j := 0; j < b.Height; j++ {
-			cR := uint8(float64(d.Red[j*b.Width+i]) * fR)
-			cG := uint8(float64(d.Green[j*b.Width+i]) * fG)
-			cB := uint8(float64(d.Blue[j*b.Width+i]) * fB)
+			cR := uint8(float64(b.Pix.Red[j*b.Width+i]) * fR)
+			cG := uint8(float64(b.Pix.Green[j*b.Width+i]) * fG)
+			cB := uint8(float64(b.Pix.Blue[j*b.Width+i]) * fB)
 			c := color.RGBA{cR, cG, cB, 255}
 			// Set color AND rotate image (j <=> i)
 			b.Img.SetRGBA(j, i, c)
 		}
 	}
+}
 
-	err := png.Encode(out, b.Img)
+func (b *Buddha) saveImage() {
+	b.writeImage()
+
+	err := png.Encode(b.Out, b.Img)
 	if err != nil {
 		log.Fatalf("Could not write image: %s", err)
 	}
