@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"runtime"
 
 	"github.com/banthar/Go-SDL/sdl"
@@ -68,7 +69,7 @@ func (s *SdlHandler) Start() {
 	gl.ClearColor(0, 0, 0, 0)
 
 	// Set up fonts
-	font := ttf.OpenFont("SourceSansPro-Black.otf", 72)
+	font := ttf.OpenFont("SourceSansPro-Black.otf", 12)
 	if font == nil {
 		panic("Could not open font file")
 	}
@@ -109,11 +110,10 @@ func (s *SdlHandler) Start() {
 			if text == nil {
 				panic("Could not render font")
 			}
+			s.RenderSampleCounter(text)
 
 			// Render
 			sdl.GL_SwapBuffers()
-
-			screen.Blit(nil, text, nil)
 
 			// Prevent overflow
 			count = 0
@@ -124,7 +124,7 @@ func (s *SdlHandler) Start() {
 }
 
 func (s *SdlHandler) RenderImageOntoScreen(img *image.RGBA) {
-	var tex gl.Texture = s.getTexture(img)
+	var tex gl.Texture = s.getTexture(s.Width, s.Height, []byte(img.Pix))
 	var tc TexCoords = TexCoords{0, 0, 1, 1}
 
 	// Draw image as texture
@@ -133,7 +133,28 @@ func (s *SdlHandler) RenderImageOntoScreen(img *image.RGBA) {
 	tex.Unbind(gl.TEXTURE_2D)
 }
 
-func (s *SdlHandler) getTexture(img *image.RGBA) gl.Texture {
+func (s *SdlHandler) RenderSampleCounter(text *sdl.Surface) {
+	rect := image.Rect(0, 0, int(text.W), int(text.H))
+	data := image.NewRGBA(rect)
+
+	for j := 0; j < int(text.H); j++ {
+		for i := 0; i < int(text.W); i++ {
+			r, g, b, a := text.At(i, j).RGBA()
+			c := color.RGBA{uint8(r), uint8(g), uint8(b), uint8(a)}
+			data.SetRGBA(i, j, c)
+		}
+	}
+
+	var tex gl.Texture = s.getTexture(int(text.W), int(text.H), data.Pix)
+	var tc TexCoords = TexCoords{0, 0, 1, 1}
+
+	// Draw image as texture
+	tex.Bind(gl.TEXTURE_2D)
+	drawQuad(0, 0, int(text.W), int(text.H), tc.TX, tc.TY, tc.TX2, tc.TY2)
+	tex.Unbind(gl.TEXTURE_2D)
+}
+
+func (s *SdlHandler) getTexture(w, h int, data []byte) gl.Texture {
 	id := gl.GenTexture()
 	id.Bind(gl.TEXTURE_2D)
 
@@ -143,7 +164,7 @@ func (s *SdlHandler) getTexture(img *image.RGBA) gl.Texture {
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE)
 
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, s.Width, s.Height, 0, gl.RGBA, gl.UNSIGNED_BYTE, []byte(img.Pix))
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
 
 	if gl.GetError() != gl.NO_ERROR {
 		id.Delete()
